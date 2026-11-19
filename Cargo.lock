@@ -368,6 +368,59 @@ dependencies = [
 ]
 
 [[package]]
+name = "stan-model-rs-stanc"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "stan-model-rs",
+ "stan-model-rs-fixtures",
+ "stanc-rs",
+ "stanc-rs-runtime",
+]
+
+[[package]]
+name = "stanc-rs"
+version = "0.1.0"
+source = "git+https://github.com/adamrsophie/stanc-rs?rev=242398e7bbd1754a514f221d31078254afb108f8#242398e7bbd1754a514f221d31078254afb108f8"
+dependencies = [
+ "stanc-rs-codegen",
+ "stanc-rs-semantic",
+ "stanc-rs-syntax",
+]
+
+[[package]]
+name = "stanc-rs-codegen"
+version = "0.1.0"
+source = "git+https://github.com/adamrsophie/stanc-rs?rev=242398e7bbd1754a514f221d31078254afb108f8#242398e7bbd1754a514f221d31078254afb108f8"
+dependencies = [
+ "stanc-rs-semantic",
+ "stanc-rs-syntax",
+]
+
+[[package]]
+name = "stanc-rs-runtime"
+version = "0.1.0"
+source = "git+https://github.com/adamrsophie/stanc-rs?rev=242398e7bbd1754a514f221d31078254afb108f8#242398e7bbd1754a514f221d31078254afb108f8"
+dependencies = [
+ "rand 0.10.4",
+ "serde_json",
+ "stanmath-rs",
+]
+
+[[package]]
+name = "stanc-rs-semantic"
+version = "0.1.0"
+source = "git+https://github.com/adamrsophie/stanc-rs?rev=242398e7bbd1754a514f221d31078254afb108f8#242398e7bbd1754a514f221d31078254afb108f8"
+dependencies = [
+ "stanc-rs-syntax",
+]
+
+[[package]]
+name = "stanc-rs-syntax"
+version = "0.1.0"
+source = "git+https://github.com/adamrsophie/stanc-rs?rev=242398e7bbd1754a514f221d31078254afb108f8#242398e7bbd1754a514f221d31078254afb108f8"
+
+[[package]]
 name = "stanmath-rs"
 version = "0.1.0"
 source = "git+https://github.com/adamrsophie/stanmath-rs?rev=04dc87184161bf29cbc035a32eb0407b14169900#04dc87184161bf29cbc035a32eb0407b14169900"

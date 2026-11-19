@@ -19,6 +19,10 @@ stan-model-rs-fixtures = { path = "crates/stan-model-rs-fixtures" }
 # Pinned to the same revision as stanc-rs, so generated models and this runtime share one copy of
 # the stanmath-rs scalar types.
 stanmath-rs = { git = "https://github.com/adamrsophie/stanmath-rs", rev = "04dc87184161bf29cbc035a32eb0407b14169900" }
+# The stanc-rs compiler and the runtime its generated code targets, at a revision built on the
+# same stanmath-rs revision as this workspace. Used only by the stan-model-rs-stanc adapter.
+stanc-rs = { git = "https://github.com/adamrsophie/stanc-rs", rev = "242398e7bbd1754a514f221d31078254afb108f8" }
+stanc-rs-runtime = { git = "https://github.com/adamrsophie/stanc-rs", rev = "242398e7bbd1754a514f221d31078254afb108f8" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 rand = { version = "0.10", default-features = false, features = ["std_rng"] }

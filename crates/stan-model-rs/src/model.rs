@@ -228,7 +228,30 @@ pub trait Model {
         theta: &[f64],
         opts: LogDensityOptions,
         h: f64,
-    ) -> Result<GradientCheck>;
+    ) -> Result<GradientCheck> {
+        let (value, gradient) = self.log_density_gradient(theta, opts)?;
+        let mut x = theta.to_vec();
+        let mut finite_diff = Vec::with_capacity(theta.len());
+        for i in 0..theta.len() {
+            x[i] = theta[i] + h;
+            let up = self.log_density(&x, opts)?;
+            x[i] = theta[i] - h;
+            let down = self.log_density(&x, opts)?;
+            x[i] = theta[i];
+            finite_diff.push((up - down) / (2.0 * h));
+        }
+        let max_rel_error = gradient
+            .iter()
+            .zip(&finite_diff)
+            .map(|(g, f)| (g - f).abs() / f.abs().max(1.0))
+            .fold(0.0, f64::max);
+        Ok(GradientCheck {
+            value,
+            gradient,
+            finite_diff,
+            max_rel_error,
+        })
+    }
 
     /// Constrained parameters, then (if requested) transformed parameters and generated
     /// quantities, in output order. Generated quantities draw from `rng`.
@@ -370,36 +393,6 @@ impl<M: StanModel> Model for M {
             return Err(e);
         }
         Ok(hv)
-    }
-
-    fn check_gradient(
-        &self,
-        theta: &[f64],
-        opts: LogDensityOptions,
-        h: f64,
-    ) -> Result<GradientCheck> {
-        let (value, gradient) = self.log_density_gradient(theta, opts)?;
-        let mut x = theta.to_vec();
-        let mut finite_diff = Vec::with_capacity(theta.len());
-        for i in 0..theta.len() {
-            x[i] = theta[i] + h;
-            let up = Model::log_density(self, &x, opts)?;
-            x[i] = theta[i] - h;
-            let down = Model::log_density(self, &x, opts)?;
-            x[i] = theta[i];
-            finite_diff.push((up - down) / (2.0 * h));
-        }
-        let max_rel_error = gradient
-            .iter()
-            .zip(&finite_diff)
-            .map(|(g, f)| (g - f).abs() / f.abs().max(1.0))
-            .fold(0.0, f64::max);
-        Ok(GradientCheck {
-            value,
-            gradient,
-            finite_diff,
-            max_rel_error,
-        })
     }
 
     fn write_array(&self, theta: &[f64], outputs: Outputs, rng: &mut dyn Rng) -> Result<Vec<f64>> {

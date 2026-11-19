@@ -47,6 +47,11 @@ impl Data {
         Self::from_json_str(&s)
     }
 
+    /// The data as a JSON string (CmdStan's format).
+    pub fn to_json_string(&self) -> String {
+        Value::Object(self.root.clone()).to_string()
+    }
+
     /// True if variable `name` is present.
     pub fn contains(&self, name: &str) -> bool {
         self.root.contains_key(name)
