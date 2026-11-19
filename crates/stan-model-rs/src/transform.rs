@@ -274,15 +274,35 @@ fn check_shape(var: &VarInfo) -> Result<()> {
         _ => false,
     };
     let ok = ok && !(var.base.is_int() && var.block == crate::Block::Parameters);
-    if ok {
-        Ok(())
-    } else {
-        Err(ModelError::internal(format!(
+    if !ok {
+        return Err(ModelError::internal(format!(
             "constraint {:?} is not valid for type {:?}",
             var.constraint, var.base
         ))
-        .with_variable(var.name.clone()))
+        .with_variable(var.name.clone()));
     }
+    // Transforms whose constrained size is the unconstrained size plus one are undefined for size
+    // zero; Stan's deserializer rejects these sizes with `check_positive`.
+    use Constraint::*;
+    let d = var.base.dims();
+    let positive: &[usize] = match var.constraint {
+        Simplex | SumToZero | UnitVector => &d[..1],
+        SumToZeroMatrix => &d[..2],
+        StochasticColumn => &d[..1],
+        StochasticRow => &d[1..2],
+        _ => &[],
+    };
+    if positive.contains(&0) {
+        return Err(ModelError::new(
+            ErrorKind::Size,
+            format!(
+                "{:?} requires a positive size, found {:?}",
+                var.constraint, var.base
+            ),
+        )
+        .with_variable(var.name.clone()));
+    }
+    Ok(())
 }
 
 /// Splits the values of a tuple variable (stored element by element, components in order) into
@@ -641,6 +661,49 @@ mod tests {
                     "{:?}: {back:?} vs {y:?}",
                     v.constraint
                 );
+            }
+        }
+    }
+
+    /// Sizes 0 and 1 of every structured transform (Stan issues 2365, 2588, 2742, 2958, 1246):
+    /// each either round trips with consistent lengths or returns an error, and never panics.
+    #[test]
+    fn edge_sizes() {
+        use Constraint::*;
+        let mut cases = Vec::new();
+        for k in [0, 1] {
+            for c in [Ordered, PositiveOrdered, Simplex, SumToZero, UnitVector] {
+                cases.push(var(BaseType::Vector(k), vec![], c));
+            }
+            for c in [CholeskyFactorCorr, CorrMatrix, CovMatrix, CholeskyFactorCov] {
+                cases.push(var(BaseType::Matrix(k, k), vec![], c));
+            }
+            for (r, c) in [(k, 2), (2, k)] {
+                for t in [SumToZeroMatrix, StochasticColumn, StochasticRow] {
+                    cases.push(var(BaseType::Matrix(r, c), vec![], t));
+                }
+            }
+            cases.push(var(BaseType::Matrix(2, k), vec![], CholeskyFactorCov));
+            cases.push(var(BaseType::Vector(3), vec![k, 2], Simplex));
+        }
+        for v in &cases {
+            let b = Bounds::from_metadata(v).unwrap();
+            let y = vec![0.2; v.num_unconstrained()];
+            let mut lp = 0.0;
+            let what = format!("{:?} {:?} {:?}", v.base, v.array_dims, v.constraint);
+            match constrain::<f64>(v, &b, &y, Some(&mut lp)) {
+                Ok(x) => {
+                    assert_eq!(x.len(), v.num_constrained(), "{what}");
+                    assert!(lp.is_finite(), "{what}");
+                    check(v, &b, &x).unwrap_or_else(|e| panic!("{what}: {e}"));
+                    let back = free(v, &b, &x).unwrap_or_else(|e| panic!("{what}: {e}"));
+                    assert_eq!(back.len(), y.len(), "{what}");
+                }
+                Err(e) => {
+                    assert_eq!(e.kind, ErrorKind::Size, "{what}: {e}");
+                    let size_zero = v.base.dims().contains(&0);
+                    assert!(size_zero, "{what}: {e}");
+                }
             }
         }
     }

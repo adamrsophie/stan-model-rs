@@ -59,6 +59,7 @@ fixtures).
 | `param_constrain(theta)` | Constrained parameters only |
 | `param_unconstrain(values)` | Unconstrained vector from constrained values in output order |
 | `param_unconstrain_json(data)` | The same from values given by name (initial values) |
+| `param_initialize(data, radius, rng)` | Stan's initialization: given parameters keep their values, missing ones are drawn uniformly in `(-radius, radius)` on the unconstrained scale |
 
 `LogDensityOptions { jacobian, propto }` defaults to `{ true, false }`, the full density on the
 unconstrained space. `LogDensityOptions::SAMPLING` is `{ true, true }`, what HMC uses and what

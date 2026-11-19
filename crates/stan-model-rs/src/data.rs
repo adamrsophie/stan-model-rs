@@ -26,8 +26,9 @@ impl Data {
 
     /// Parses a JSON object.
     pub fn from_json_str(s: &str) -> Result<Data> {
+        let s = quote_non_finite(s);
         let v: Value =
-            serde_json::from_str(s).map_err(|e| ModelError::data(format!("invalid JSON: {e}")))?;
+            serde_json::from_str(&s).map_err(|e| ModelError::data(format!("invalid JSON: {e}")))?;
         Self::from_json_value(v)
     }
 
@@ -285,6 +286,43 @@ fn row_major_to_storage(var: &VarInfo, v: Vec<f64>) -> Vec<f64> {
         }
     }
     out
+}
+
+/// Stan's JSON reader also accepts the bare tokens `NaN`, `Inf`, `-Inf`, `Infinity`, and
+/// `-Infinity`, which strict JSON does not. They are quoted here (outside string literals), and
+/// the quoted forms are then read like the string spellings Stan accepts.
+fn quote_non_finite(s: &str) -> std::borrow::Cow<'_, str> {
+    const TOKENS: [&str; 5] = ["-Infinity", "Infinity", "-Inf", "Inf", "NaN"];
+    if !TOKENS.iter().any(|t| s.contains(t)) {
+        return s.into();
+    }
+    let mut out = String::with_capacity(s.len() + 16);
+    let (mut in_string, mut escaped) = (false, false);
+    let mut rest = s;
+    while let Some(c) = rest.chars().next() {
+        if in_string {
+            match (escaped, c) {
+                (true, _) => escaped = false,
+                (false, '\\') => escaped = true,
+                (false, '"') => in_string = false,
+                _ => {}
+            }
+        } else if c == '"' {
+            in_string = true;
+        } else if let Some(t) = TOKENS.iter().find(|t| rest.starts_with(**t)) {
+            let after = rest[t.len()..].chars().next();
+            if !after.is_some_and(|a| a.is_alphanumeric() || a == '_') {
+                out.push('"');
+                out.push_str(t);
+                out.push('"');
+                rest = &rest[t.len()..];
+                continue;
+            }
+        }
+        out.push(c);
+        rest = &rest[c.len_utf8()..];
+    }
+    out.into()
 }
 
 #[cfg(test)]

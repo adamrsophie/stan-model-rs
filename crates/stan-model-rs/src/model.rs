@@ -287,6 +287,37 @@ pub trait Model {
         }
         self.param_unconstrain(&flat)
     }
+
+    /// Initial values in Stan's way (`stan::services::util::initialize`): parameters present in
+    /// `values` take the given constrained values, the others are drawn by constraining
+    /// unconstrained values uniform in `(-radius, radius)`; the result is unconstrained.
+    /// `radius = 0` gives zero for every missing parameter. Variables in `values` that are not
+    /// parameters are ignored, as in Stan.
+    ///
+    /// This draws one candidate. Checking that its log density and gradient are finite, and
+    /// retrying, is the services layer's job.
+    fn param_initialize(&self, values: &Data, radius: f64, rng: &mut dyn Rng) -> Result<Vec<f64>> {
+        if !(radius.is_finite() && radius >= 0.0) {
+            return Err(ModelError::parameters(format!(
+                "the initialization radius must be finite and non-negative, found {radius}"
+            )));
+        }
+        let theta = random_unconstrained(self.num_unconstrained(), radius, rng);
+        let mut constrained = self.param_constrain(&theta)?;
+        let mut pos = 0;
+        for v in self.info().parameters() {
+            let k = v.num_constrained();
+            if values.contains(&v.name) {
+                let x = values.read(v).map_err(|e| ModelError {
+                    kind: ErrorKind::Parameters,
+                    ..e
+                })?;
+                constrained[pos..pos + k].copy_from_slice(&v.to_output_order(&x));
+            }
+            pos += k;
+        }
+        self.param_unconstrain(&constrained)
+    }
 }
 
 fn check_len(theta: &[f64], n: usize, what: &str) -> Result<()> {

@@ -15,7 +15,17 @@ revision `04dc871`. stanc-rs: revision `242398e`.
   arrays (see [parameter conventions](parameter-conventions.md)).
 * **Data.** Integers must be JSON integers in the 32-bit range; real values that are whole
   numbers are not converted to integers. Reals may be `"NaN"`, `"Inf"`, `"-Inf"`, `"Infinity"`,
-  or `"-Infinity"`. Variables with no elements may be omitted, as in CmdStan.
+  or `"-Infinity"`, quoted or bare (Stan's reader accepts the bare tokens, which strict JSON
+  does not). Variables with no elements may be omitted, as in CmdStan.
+* **Sizes.** Simplexes, sum to zero vectors and matrices, unit vectors, and stochastic matrices
+  of size zero (in the dimension their transform reduces) are `Size` errors, as Stan's
+  deserializer rejects them.
+* **Print statements.** The runtime has no channel for `print` output; model code that prints
+  writes to standard error itself. Stan's buffering of prints until `log_prob` returns, and the
+  loss of prints before a `reject` (stan-dev/stan issues 2311, 3233), therefore do not apply,
+  but output cannot yet be redirected by the caller.
+* **Error locations.** Errors carry the variable and function but not the Stan source line;
+  stanc-rs does not yet pass locations to the runtime.
 
 ## stanc-rs integration
 

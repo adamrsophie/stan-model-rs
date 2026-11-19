@@ -19,6 +19,7 @@ Every check below runs in `cargo test --workspace` (the NUTS check with `--featu
 | Names of every constrained type, complex types, tuples | stanc 2.40 generated C++ | exact | `meta.rs` |
 | Repeated and interleaved evaluations, 8 threads | Serial results | bit identical | `invariants.rs` |
 | Generated quantities: reproducible per seed, isolated from the density | Same seed, different stream | exact | `invariants.rs` |
+| Problems reported in the stan-dev/stan and BridgeStan issue trackers that concern the runtime: zero sizes, empty variables, non-finite JSON tokens, numeric ranges, complex values in tuples, infinite bounds, unit vector adjustment, constraint tolerance, covariance symmetry, partial initialization, generated quantities without transformed parameters, threads | Behavior of Stan 2.40 | exact | `stan_issues.rs`, `transform.rs` |
 | NUTS (`nuts-rs`) on the normal mean model, 4000 draws | Closed-form posterior mean and variance | 6 standard errors, 15% | `nuts.rs` |
 
 ## Regenerating the CmdStan reference values

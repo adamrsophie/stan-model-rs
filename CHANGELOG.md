@@ -7,3 +7,5 @@
   generated quantities, random number streams.
 * Reference models, CmdStan 2.40 reference values, and end-to-end tests of stanc-rs output.
 * Optional `nuts-rs` adapter.
+* `param_initialize` for partial initial values; bare `NaN` and `Infinity` in JSON data;
+  size zero structured transforms are errors instead of producing wrongly sized values.
