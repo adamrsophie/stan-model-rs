@@ -20,12 +20,15 @@ revision `04dc871`. stanc-rs: revision `242398e`.
 * **Sizes.** Simplexes, sum to zero vectors and matrices, unit vectors, and stochastic matrices
   of size zero (in the dimension their transform reduces) are `Size` errors, as Stan's
   deserializer rejects them.
-* **Print statements.** The runtime has no channel for `print` output; model code that prints
-  writes to standard error itself. Stan's buffering of prints until `log_prob` returns, and the
-  loss of prints before a `reject` (stan-dev/stan issues 2311, 3233), therefore do not apply,
-  but output cannot yet be redirected by the caller.
-* **Error locations.** Errors carry the variable and function but not the Stan source line;
-  stanc-rs does not yet pass locations to the runtime.
+* **Print statements.** Stan passes an output stream to every model method; here the stream
+  belongs to the calling thread (`print::set_sink`, `print::with_sink`), so model methods keep
+  their signatures and chains on separate threads keep separate output. Without a sink, lines
+  go to standard output, as in CmdStan. Lines are written when printed, not buffered until the
+  evaluation returns, so lines printed before a `reject` are kept (stan-dev/stan issues 2311,
+  3233).
+* **Error locations.** `ModelError::locations` holds the Stan source locations of the failing
+  statement and the user-defined function calls around it, innermost first, and `Display`
+  prints them as Stan's `rethrow_located` does. Generated code records them with `locate`.
 
 ## stanc-rs integration
 
@@ -50,6 +53,7 @@ To target `StanModel` directly, the generated code needs these interface changes
 | `Model::unconstrained_param_names` returns `theta.1`, ... | stanc3's names from the metadata |
 | `rt::data::Data`, `rt::io::Reader` | `stan_model_rs::Data`, `transform::Reader` |
 | no Hessians | `log_density_hessian` and Hessian-vector products through `Dual<Var>` |
+| `print::{set_sink, with_sink, line}`, `ModelError::locations`, `locate` (in development after `242398e`) | the same functions in `stan_model_rs::print` and `stan_model_rs::error`, so generated code needs no change; the adapter forwards locations once its pin includes them |
 
 Two facts the generated code must respect, both already true of stanc-rs:
 

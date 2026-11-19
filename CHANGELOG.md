@@ -9,3 +9,5 @@
 * Optional `nuts-rs` adapter.
 * `param_initialize` for partial initial values; bare `NaN` and `Infinity` in JSON data;
   size zero structured transforms are errors instead of producing wrongly sized values.
+* Stan source locations in errors and a per-thread sink for `print` output, with the API
+  stanc-rs generates against.

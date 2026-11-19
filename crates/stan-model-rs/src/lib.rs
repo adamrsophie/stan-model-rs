@@ -29,11 +29,12 @@ pub mod meta;
 pub mod model;
 #[cfg(feature = "nuts")]
 pub mod nuts;
+pub mod print;
 pub mod rng;
 pub mod transform;
 
 pub use data::Data;
-pub use error::{ErrorKind, ModelError, Result, fatal_error, reject};
+pub use error::{ErrorKind, ModelError, Result, fatal_error, locate, reject};
 pub use meta::{BaseType, Block, Bound, Constraint, ModelInfo, Outputs, VarInfo};
 pub use model::{GradientCheck, LogDensityOptions, Model, StanModel};
 pub use transform::{Bounds, Reader};

@@ -81,6 +81,12 @@ CmdStan's `log_prob` method computes.
 | `Unsupported` | Operation not supported by the model or runtime | no |
 | `Internal` | Inconsistent metadata or a bug | no |
 
+`locations` lists the Stan source locations of the failing statement and of the
+user-defined function calls around it, innermost first (`ModelError::at`, `error::locate`).
+
+Output of `print` statements goes to the calling thread's sink (`print::with_sink`), or to
+standard output when none is set.
+
 `ErrorKind::is_recoverable` is true where Stan throws `std::domain_error`: a sampler rejects the
 proposal and continues. A log density of negative infinity is a value, not an error. NaN values
 are never replaced.

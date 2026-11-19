@@ -409,3 +409,55 @@ fn partial_initialization() {
         "{c:?}"
     );
 }
+
+/// stan #2348, #1990: errors carry the Stan source locations, printed as `rethrow_located`
+/// prints them, and survive serialization.
+#[test]
+fn error_locations() {
+    use stan_model_rs::{ModelError, locate};
+    let table = [
+        "'m.stan', line 3, column 2 to column 20",
+        "'m.stan', line 9, column 4 to column 11",
+    ];
+    let e = locate(ModelError::domain("bad scale"), 1, &table);
+    let e = locate(e, 0, &table);
+    let e = locate(e, usize::MAX, &table);
+    assert_eq!(e.locations, [table[1], table[0]]);
+    assert_eq!(
+        e.to_string(),
+        "bad scale (in 'm.stan', line 9, column 4 to column 11) (in 'm.stan', line 3, column 2 to column 20)"
+    );
+    let json = serde_json::to_string(&e).unwrap();
+    assert_eq!(serde_json::from_str::<ModelError>(&json).unwrap(), e);
+}
+
+/// stan #2311, #3233, #1789, #1936, #2989, bridgestan #93: printed lines go to the calling
+/// thread's sink as they are printed, so lines before a rejection are kept, and threads do not
+/// mix their output.
+#[test]
+fn print_output() {
+    use stan_model_rs::{print, reject};
+    let (r, out) = print::with_sink(Vec::new(), || {
+        print::line("before");
+        reject::<()>("stop")
+    });
+    assert_eq!(r.unwrap_err().kind, ErrorKind::Reject);
+    assert_eq!(out, b"before\n");
+    let handles: Vec<_> = (0..4)
+        .map(|t| {
+            std::thread::spawn(move || {
+                print::with_sink(Vec::new(), || {
+                    for i in 0..100 {
+                        print::line(&format!("{t} {i}"));
+                    }
+                })
+                .1
+            })
+        })
+        .collect();
+    for (t, h) in handles.into_iter().enumerate() {
+        let text = String::from_utf8(h.join().unwrap()).unwrap();
+        assert_eq!(text.lines().count(), 100);
+        assert!(text.lines().all(|l| l.starts_with(&format!("{t} "))));
+    }
+}

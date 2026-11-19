@@ -65,6 +65,12 @@ pub struct ModelError {
     pub function: Option<String>,
     /// Offending numerical value, if there is a single one.
     pub value: Option<f64>,
+    /// The Stan source locations of the statements that were running, innermost first: the
+    /// statement that failed, then the call sites of the user-defined functions it was in.
+    /// Each is written as stanc3 writes them, for example
+    /// `'model.stan', line 5, column 2 to column 20`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub locations: Vec<String>,
 }
 
 impl ModelError {
@@ -76,6 +82,7 @@ impl ModelError {
             variable: None,
             function: None,
             value: None,
+            locations: Vec::new(),
         }
     }
 
@@ -130,6 +137,13 @@ impl ModelError {
         self
     }
 
+    /// Adds the source location of the statement that was running when the error passed
+    /// through a generated function.
+    pub fn at(mut self, location: &str) -> Self {
+        self.locations.push(location.to_string());
+        self
+    }
+
     /// Reclassifies the error as a [`ErrorKind::Data`] error. Generated code applies this to
     /// constraint checks in the data and transformed data blocks, whose failures are data
     /// problems rather than rejected proposals.
@@ -144,7 +158,22 @@ impl fmt::Display for ModelError {
         if let Some(v) = &self.variable {
             write!(f, "{v}: ")?;
         }
-        write!(f, "{}", self.message)
+        write!(f, "{}", self.message)?;
+        // As Stan's `rethrow_located` prints them.
+        for loc in &self.locations {
+            write!(f, " (in {loc})")?;
+        }
+        Ok(())
+    }
+}
+
+/// Adds `table[statement]` to an error leaving a generated function. `statement` is the
+/// position in the model's location table of the last statement that started, or any
+/// out-of-range value (generated code uses `usize::MAX`) before the first one.
+pub fn locate(e: ModelError, statement: usize, table: &[&str]) -> ModelError {
+    match table.get(statement) {
+        Some(loc) => e.at(loc),
+        None => e,
     }
 }
 
