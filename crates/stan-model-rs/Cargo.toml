@@ -16,10 +16,24 @@ stanmath-rs.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 rand.workspace = true
+nuts-rs = { workspace = true, optional = true }
+
+[features]
+# An adapter that lets the NUTS sampler of the nuts-rs crate draw from any Model.
+nuts = ["dep:nuts-rs"]
 
 [dev-dependencies]
 stan-model-rs-fixtures.workspace = true
 proptest.workspace = true
+criterion.workspace = true
+
+[[bench]]
+name = "evaluation"
+harness = false
+
+[[test]]
+name = "nuts"
+required-features = ["nuts"]
 
 [lints]
 workspace = true

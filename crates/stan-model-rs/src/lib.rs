@@ -27,6 +27,8 @@ pub mod data;
 pub mod error;
 pub mod meta;
 pub mod model;
+#[cfg(feature = "nuts")]
+pub mod nuts;
 pub mod rng;
 pub mod transform;
 
