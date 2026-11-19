@@ -1,0 +1,16 @@
+[package]
+name = "stan-model-rs-fixtures"
+description = "Hand-written reference models implementing the stan-model-rs contract, used by tests, examples, and benchmarks"
+publish = false
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+stan-model-rs.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,25 @@
+[package]
+name = "stan-model-rs"
+description = "Rust-native Stan model execution runtime: model contract, data, parameter transforms, log densities and gradients"
+readme = "../../README.md"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+stanmath-rs.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+rand.workspace = true
+
+[dev-dependencies]
+stan-model-rs-fixtures.workspace = true
+proptest.workspace = true
+
+[lints]
+workspace = true
