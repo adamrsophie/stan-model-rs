@@ -7,7 +7,8 @@ use stan_model_rs::meta::{BaseType, Block, Bound, Constraint, ModelInfo, Outputs
 use stan_model_rs::rand::Rng;
 use stan_model_rs::stanmath_rs::autodiff::{Broadcast, Promoted};
 use stan_model_rs::stanmath_rs::prelude::{
-    exponential_lpdf, exponential_lupdf, normal_lpdf, normal_lupdf, normal_rng,
+    exponential_lpdf, exponential_lupdf, lb_constrain, lb_constrain_lp, lb_free, normal_lpdf,
+    normal_lupdf, normal_rng,
 };
 use stan_model_rs::{Data, Reader, Real, Result, StanModel};
 
@@ -334,6 +335,81 @@ impl StanModel for Structured {
             lp += normal(ci, 0.0, 3.0, propto)?;
         }
         Ok(lp + jac)
+    }
+}
+
+/// A bound that depends on another parameter, which the default metadata-driven transforms
+/// cannot evaluate, so the model implements the constraining and unconstraining itself:
+///
+/// ```stan
+/// parameters {
+///   real a;
+///   real<lower=a> b;
+/// }
+/// model {
+///   a ~ normal(0, 1);
+///   b ~ normal(a + 1, 1);
+/// }
+/// ```
+#[derive(Clone, Debug)]
+pub struct DependentBound {
+    info: ModelInfo,
+}
+
+impl DependentBound {
+    /// The model has no data.
+    pub fn new() -> Self {
+        let b = VarInfo::new(
+            "b",
+            Block::Parameters,
+            vec![],
+            BaseType::Real,
+            Constraint::Lower(Bound::Expression),
+        );
+        DependentBound {
+            info: ModelInfo::new("dependent_bound_model", vec![VarInfo::real_param("a"), b]),
+        }
+    }
+}
+
+impl Default for DependentBound {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl StanModel for DependentBound {
+    fn model_info(&self) -> &ModelInfo {
+        &self.info
+    }
+
+    fn log_prob<T: Real>(&self, theta: &[T], jacobian: bool, propto: bool) -> Result<T> {
+        let mut lp = T::zero();
+        let a = theta[0];
+        let b = if jacobian {
+            lb_constrain_lp(theta[1], a, &mut lp)
+        } else {
+            lb_constrain(theta[1], a)
+        };
+        lp += normal(a, 0.0, 1.0, propto)?;
+        lp += normal(b, a + 1.0, 1.0, propto)?;
+        Ok(lp)
+    }
+
+    fn write_array_impl(
+        &self,
+        theta: &[f64],
+        _outputs: Outputs,
+        _rng: &mut dyn Rng,
+    ) -> Result<Vec<f64>> {
+        Ok(vec![theta[0], lb_constrain(theta[1], theta[0])])
+    }
+
+    fn unconstrain_impl(&self, constrained: &[f64]) -> Result<Vec<f64>> {
+        let a = constrained[0];
+        let b = lb_free(constrained[1], a)
+            .map_err(|e| stan_model_rs::ModelError::from(e).with_variable("b"))?;
+        Ok(vec![a, b])
     }
 }
 

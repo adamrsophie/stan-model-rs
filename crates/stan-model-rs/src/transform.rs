@@ -247,6 +247,7 @@ fn constrain_element<T: Real>(
 /// malformed [`VarInfo`] fails with an error instead of a panic.
 fn check_shape(var: &VarInfo) -> Result<()> {
     let ok = match (var.constraint, var.base) {
+        (c, BaseType::Tuple) => c == Constraint::None && !var.slots.is_empty(),
         (_, b) if b.is_complex() => var.constraint == Constraint::None,
         (Constraint::None, _)
         | (Constraint::Lower(_), _)
@@ -284,6 +285,28 @@ fn check_shape(var: &VarInfo) -> Result<()> {
     }
 }
 
+/// Splits the values of a tuple variable (stored element by element, components in order) into
+/// one chunk per component of each element. The components are named `name:k` for messages.
+fn tuple_parts<'a, X>(
+    var: &VarInfo,
+    values: &'a [X],
+    size: fn(&VarInfo) -> usize,
+) -> Vec<(VarInfo, &'a [X])> {
+    let mut out = Vec::new();
+    let mut pos = 0;
+    for _ in 0..var.num_elements() {
+        for (k, slot) in var.slots.iter().enumerate() {
+            let n = size(slot);
+            out.push((
+                slot.renamed(format!("{}:{}", var.name, k + 1)),
+                &values[pos..pos + n],
+            ));
+            pos += n;
+        }
+    }
+    out
+}
+
 /// Constrains a whole variable from its unconstrained values `y` (exactly
 /// [`VarInfo::num_unconstrained`] of them), returning its constrained values in storage order.
 /// With `lp`, adds the log absolute Jacobian determinant of the transform to it.
@@ -301,6 +324,19 @@ pub fn constrain<T: Real>(
             y.len()
         ))
         .with_variable(var.name.clone()));
+    }
+    if var.is_tuple() {
+        // The bounds of tuple components come from their metadata.
+        let mut out = Vec::with_capacity(var.num_constrained());
+        for (slot, chunk) in tuple_parts(var, y, VarInfo::num_unconstrained) {
+            out.extend(constrain(
+                &slot,
+                &Bounds::from_metadata(&slot)?,
+                chunk,
+                lp.as_deref_mut(),
+            )?);
+        }
+        return Ok(out);
     }
     let n_elem = var.num_elements();
     if n_elem == 0 {
@@ -332,6 +368,13 @@ pub fn free(var: &VarInfo, bounds: &Bounds, x: &[f64]) -> Result<Vec<f64>> {
             ),
         )
         .with_variable(var.name.clone()));
+    }
+    if var.is_tuple() {
+        let mut out = Vec::with_capacity(var.num_unconstrained());
+        for (slot, chunk) in tuple_parts(var, x, VarInfo::num_constrained) {
+            out.extend(free(&slot, &Bounds::from_metadata(&slot)?, chunk)?);
+        }
+        return Ok(out);
     }
     let n_elem = var.num_elements();
     let mut out = Vec::with_capacity(var.num_unconstrained());
@@ -406,6 +449,12 @@ pub fn check(var: &VarInfo, bounds: &Bounds, x: &[f64]) -> Result<()> {
             ),
         )
         .with_variable(var.name.clone()));
+    }
+    if var.is_tuple() {
+        for (slot, chunk) in tuple_parts(var, x, VarInfo::num_constrained) {
+            check(&slot, &Bounds::from_metadata(&slot)?, chunk)?;
+        }
+        return Ok(());
     }
     if var.constraint == Constraint::None || var.base.is_complex() {
         return Ok(());
@@ -594,6 +643,33 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn tuples() {
+        let slots = vec![
+            var(BaseType::Real, vec![], Constraint::Lower(Bound::Value(0.0))),
+            var(BaseType::Vector(3), vec![], Constraint::Simplex),
+        ];
+        let q = VarInfo::tuple("q", Block::Parameters, vec![2], slots);
+        assert_eq!((q.num_unconstrained(), q.num_constrained()), (6, 8));
+        let y = [0.1, 0.0, 0.0, -0.2, 0.3, 0.3];
+        let mut lp = 0.0;
+        let x = constrain(&q, &Bounds::NONE, &y, Some(&mut lp)).unwrap();
+        assert!(close(
+            &x[..4],
+            &[0.1f64.exp(), 1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0],
+            1e-12
+        ));
+        check(&q, &Bounds::NONE, &x).unwrap();
+        assert!(close(&free(&q, &Bounds::NONE, &x).unwrap(), &y, 1e-12));
+        let mut bad = x.clone();
+        bad[4] = -1.0;
+        let e = free(&q, &Bounds::NONE, &bad).unwrap_err();
+        assert_eq!(
+            (e.kind, e.variable.as_deref()),
+            (ErrorKind::Constraint, Some("q:1"))
+        );
     }
 
     #[test]

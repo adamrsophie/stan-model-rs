@@ -70,22 +70,7 @@ impl Data {
     /// different shape, holds a non-integer where an `int` is declared, or holds an integer
     /// outside Stan's 32-bit range.
     pub fn read(&self, var: &VarInfo) -> Result<Vec<f64>> {
-        let name = &var.name;
-        let mut dims = var.dims();
-        if var.base.is_complex() {
-            dims.push(2);
-        }
-        let value = match self.root.get(name) {
-            Some(v) => v,
-            None if dims.contains(&0) => return Ok(Vec::new()),
-            None => {
-                return Err(ModelError::data("variable not found in the data").with_variable(name));
-            }
-        };
-        let mut row_major = Vec::with_capacity(dims.iter().product());
-        flatten(value, &dims, var.base.is_int(), &mut row_major)
-            .map_err(|e| e.with_variable(name.clone()))?;
-        Ok(row_major_to_storage(var, row_major))
+        read_value(var, self.root.get(&var.name))
     }
 
     /// Reads `var` like [`Data::read`] and checks its declared constraint with the bounds in its
@@ -124,6 +109,76 @@ impl Data {
             crate::Constraint::None,
         );
         Ok(self.read(&var)?[0])
+    }
+}
+
+/// Reads the value `value` of `var` (or `None` if it is absent) into storage order.
+fn read_value(var: &VarInfo, value: Option<&Value>) -> Result<Vec<f64>> {
+    let name = &var.name;
+    let mut dims = var.dims();
+    if var.base.is_complex() {
+        dims.push(2);
+    }
+    let value = match value {
+        Some(v) => v,
+        None if var.num_elements() == 0 || dims.contains(&0) => return Ok(Vec::new()),
+        None => {
+            return Err(ModelError::data("variable not found in the data").with_variable(name));
+        }
+    };
+    if var.is_tuple() {
+        return read_tuple(var, value);
+    }
+    let mut row_major = Vec::with_capacity(dims.iter().product());
+    flatten(value, &dims, var.base.is_int(), &mut row_major)
+        .map_err(|e| e.with_variable(name.clone()))?;
+    Ok(row_major_to_storage(var, row_major))
+}
+
+/// Reads a tuple or an array of tuples. Each tuple is a JSON object with keys `"1"`, `"2"`, ...;
+/// the elements are stored with the array indices in column-major order.
+fn read_tuple(var: &VarInfo, value: &Value) -> Result<Vec<f64>> {
+    let mut elements = Vec::with_capacity(var.num_elements());
+    collect_elements(value, &var.array_dims, &mut elements)
+        .map_err(|e| e.with_variable(var.name.clone()))?;
+    // JSON nests arrays row-major; reorder to column-major.
+    let dims = &var.array_dims;
+    let mut out = Vec::with_capacity(var.num_constrained());
+    for idx in crate::meta::column_major_indices(dims) {
+        let mut p = 0;
+        for (i, d) in idx.iter().zip(dims) {
+            p = p * d + (i - 1);
+        }
+        let Value::Object(fields) = elements[p] else {
+            return Err(ModelError::data(format!(
+                "expected a tuple (an object with keys \"1\", \"2\", ...), found {}",
+                describe(elements[p])
+            ))
+            .with_variable(var.name.clone()));
+        };
+        for (k, slot) in var.slots.iter().enumerate() {
+            let slot = slot.renamed(format!("{}:{}", var.name, k + 1));
+            out.extend(read_value(&slot, fields.get(&(k + 1).to_string()))?);
+        }
+    }
+    Ok(out)
+}
+
+fn collect_elements<'a>(v: &'a Value, dims: &[usize], out: &mut Vec<&'a Value>) -> Result<()> {
+    match dims.split_first() {
+        None => {
+            out.push(v);
+            Ok(())
+        }
+        Some((&n, rest)) => match v {
+            Value::Array(a) if a.len() == n => {
+                a.iter().try_for_each(|x| collect_elements(x, rest, out))
+            }
+            _ => Err(ModelError::data(format!(
+                "expected a list of {n} elements, found {}",
+                describe(v)
+            ))),
+        },
     }
 }
 
@@ -283,6 +338,49 @@ mod tests {
         assert_eq!(data.real("n").unwrap(), 2.5);
         assert!(Data::from_json_str("[1]").is_err());
         assert!(Data::from_json_str("{").is_err());
+    }
+
+    #[test]
+    fn tuples() {
+        let data = Data::from_json_str(
+            r#"{"q": [[{"1": 1, "2": [0.5, 0.5]}, {"1": 2, "2": [0.1, 0.9]}],
+                      [{"1": 3, "2": [0.2, 0.8]}, {"1": 4, "2": [0.3, 0.7]}]]}"#,
+        )
+        .unwrap();
+        let slots = vec![
+            VarInfo::new(
+                "",
+                Block::Data,
+                vec![],
+                BaseType::Int,
+                Constraint::Lower(Bound::Value(0.0)),
+            ),
+            VarInfo::new(
+                "",
+                Block::Data,
+                vec![],
+                BaseType::Vector(2),
+                Constraint::Simplex,
+            ),
+        ];
+        let q = VarInfo::tuple("q", Block::Data, vec![2, 2], slots);
+        // Elements in column-major order: q[1,1], q[2,1], q[1,2], q[2,2].
+        assert_eq!(
+            data.read_checked(&q).unwrap(),
+            [1.0, 0.5, 0.5, 3.0, 0.2, 0.8, 2.0, 0.1, 0.9, 4.0, 0.3, 0.7]
+        );
+        let bad = Data::from_json_str(r#"{"q": [[{"1": 1}]]}"#).unwrap();
+        assert_eq!(bad.read(&q).unwrap_err().kind, ErrorKind::Data);
+        let neg = Data::from_json_str(
+            r#"{"q": [[{"1": -1, "2": [0.5, 0.5]}, {"1": 2, "2": [0.1, 0.9]}],
+                      [{"1": 3, "2": [0.2, 0.8]}, {"1": 4, "2": [0.3, 0.7]}]]}"#,
+        )
+        .unwrap();
+        let e = neg.read_checked(&q).unwrap_err();
+        assert_eq!(
+            (e.kind, e.variable.as_deref()),
+            (ErrorKind::Data, Some("q:1"))
+        );
     }
 
     #[test]

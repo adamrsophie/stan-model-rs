@@ -14,9 +14,9 @@ pub use rand::rngs::StdRng;
 
 /// A generator for stream `stream` of seed `seed`.
 ///
-/// Distinct `(seed, stream)` pairs give generators seeded with distinct 64-bit values (the pair
-/// is mixed with SplitMix64, which is a bijection), so chains, transformed data, and generated
-/// quantities can use separate streams of one user seed without sharing state.
+/// For one `seed`, distinct `stream` numbers give distinct 64-bit generator seeds (the stream is
+/// mixed in with SplitMix64, a bijection), so chains, transformed data, and generated quantities
+/// can use separate streams of one user seed without sharing state.
 pub fn stream(seed: u64, stream: u64) -> StdRng {
     let mixed = splitmix64(seed ^ splitmix64(stream.wrapping_add(0x9E37_79B9_7F4A_7C15)));
     StdRng::seed_from_u64(mixed)

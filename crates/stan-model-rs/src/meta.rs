@@ -51,13 +51,15 @@ pub enum BaseType {
     ComplexRowVector(usize),
     /// `complex_matrix[rows, cols]`.
     ComplexMatrix(usize, usize),
+    /// `tuple(...)`: the component types are the [`VarInfo::slots`] of the variable.
+    Tuple,
 }
 
 impl BaseType {
     /// The container dimensions (empty for scalars).
     pub fn dims(self) -> Vec<usize> {
         match self {
-            BaseType::Int | BaseType::Real | BaseType::Complex => vec![],
+            BaseType::Int | BaseType::Real | BaseType::Complex | BaseType::Tuple => vec![],
             BaseType::Vector(n)
             | BaseType::RowVector(n)
             | BaseType::ComplexVector(n)
@@ -87,8 +89,12 @@ impl BaseType {
         self == BaseType::Int
     }
 
-    /// Number of `f64` values in one element.
+    /// Number of `f64` values in one element (0 for a tuple, whose size depends on its
+    /// components; see [`VarInfo::num_constrained`]).
     pub fn num_values(self) -> usize {
+        if self == BaseType::Tuple {
+            return 0;
+        }
         let n: usize = self.dims().iter().product();
         if self.is_complex() { 2 * n } else { n }
     }
@@ -145,21 +151,25 @@ pub enum Constraint {
 }
 
 impl Constraint {
-    /// True if the transform maps the declared shape to a different number of values, so the
-    /// unconstrained values of one element form a single free dimension.
-    pub fn changes_size(self) -> bool {
-        matches!(
-            self,
-            Constraint::Simplex
-                | Constraint::SumToZero
-                | Constraint::SumToZeroMatrix
-                | Constraint::CholeskyFactorCorr
-                | Constraint::CholeskyFactorCov
-                | Constraint::CorrMatrix
-                | Constraint::CovMatrix
-                | Constraint::StochasticColumn
-                | Constraint::StochasticRow
-        )
+    /// The dimensions of the unconstrained values of one element of type `base`, as stanc3
+    /// names them: a vector transform that drops a value keeps one dimension of the reduced
+    /// size, the sum-to-zero and stochastic matrix transforms keep two reduced dimensions, and
+    /// the Cholesky factor, correlation, and covariance transforms have a single free dimension.
+    pub fn unconstrained_dims(self, base: BaseType) -> Vec<usize> {
+        let d = base.dims();
+        let at = |i: usize| d.get(i).copied().unwrap_or(0);
+        let less = |i: usize| at(i).saturating_sub(1);
+        match self {
+            Constraint::Simplex | Constraint::SumToZero => vec![less(0)],
+            Constraint::SumToZeroMatrix => vec![less(0), less(1)],
+            Constraint::StochasticColumn => vec![less(0), at(1)],
+            Constraint::StochasticRow => vec![at(0), less(1)],
+            Constraint::CholeskyFactorCorr
+            | Constraint::CholeskyFactorCov
+            | Constraint::CorrMatrix
+            | Constraint::CovMatrix => vec![unconstrained_size(base, self)],
+            _ => d,
+        }
     }
 }
 
@@ -196,6 +206,10 @@ pub struct VarInfo {
     pub base: BaseType,
     /// Declared constraint.
     pub constraint: Constraint,
+    /// For a tuple (or an array of tuples): the component types in order. Their names are
+    /// ignored; their array dimensions, types, and constraints apply to each tuple element.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub slots: Vec<VarInfo>,
 }
 
 impl VarInfo {
@@ -213,6 +227,55 @@ impl VarInfo {
             array_dims,
             base,
             constraint,
+            slots: Vec::new(),
+        }
+    }
+
+    /// A tuple variable (an array of tuples if `array_dims` is not empty) with components
+    /// `slots`.
+    pub fn tuple(
+        name: impl Into<String>,
+        block: Block,
+        array_dims: Vec<usize>,
+        slots: Vec<VarInfo>,
+    ) -> Self {
+        VarInfo {
+            name: name.into(),
+            block,
+            array_dims,
+            base: BaseType::Tuple,
+            constraint: Constraint::None,
+            slots,
+        }
+    }
+
+    /// True for a tuple or an array of tuples.
+    pub fn is_tuple(&self) -> bool {
+        self.base == BaseType::Tuple
+    }
+
+    pub(crate) fn renamed(&self, name: String) -> VarInfo {
+        VarInfo {
+            name,
+            ..self.clone()
+        }
+    }
+
+    /// Number of constrained values of one array element.
+    pub fn element_constrained(&self) -> usize {
+        if self.is_tuple() {
+            self.slots.iter().map(VarInfo::num_constrained).sum()
+        } else {
+            self.base.num_values()
+        }
+    }
+
+    /// Number of unconstrained values of one array element.
+    pub fn element_unconstrained(&self) -> usize {
+        if self.is_tuple() {
+            self.slots.iter().map(VarInfo::num_unconstrained).sum()
+        } else {
+            unconstrained_size(self.base, self.constraint)
         }
     }
 
@@ -241,16 +304,32 @@ impl VarInfo {
 
     /// Number of constrained `f64` values (complex numbers count twice).
     pub fn num_constrained(&self) -> usize {
-        self.num_elements() * self.base.num_values()
+        self.num_elements() * self.element_constrained()
     }
 
     /// Number of unconstrained values. Only meaningful for parameters.
     pub fn num_unconstrained(&self) -> usize {
-        self.num_elements() * unconstrained_size(self.base, self.constraint)
+        self.num_elements() * self.element_unconstrained()
     }
 
-    /// Flattened names in output order (`beta.1`, `Sigma.2.1`, `z.real`).
+    /// Names of a tuple's components, element by element (array indices column-major), as
+    /// stanc3 writes them: `p:1`, `q.2.1:2.3`.
+    fn tuple_names(&self, names: impl Fn(&VarInfo) -> Vec<String>) -> Vec<String> {
+        let mut out = Vec::new();
+        for idx in column_major_indices(&self.array_dims) {
+            let prefix = indexed_name(&self.name, &idx);
+            for (k, slot) in self.slots.iter().enumerate() {
+                out.extend(names(&slot.renamed(format!("{prefix}:{}", k + 1))));
+            }
+        }
+        out
+    }
+
+    /// Flattened names in output order (`beta.1`, `Sigma.2.1`, `z.real`, `p:1`).
     pub fn output_names(&self) -> Vec<String> {
+        if self.is_tuple() {
+            return self.tuple_names(VarInfo::output_names);
+        }
         let mut out = Vec::with_capacity(self.num_constrained());
         for idx in column_major_indices(&self.dims()) {
             let name = indexed_name(&self.name, &idx);
@@ -266,13 +345,11 @@ impl VarInfo {
 
     /// Flattened names of the unconstrained values, as stanc3 generates them.
     pub fn unconstrained_names(&self) -> Vec<String> {
-        let dims = if self.constraint.changes_size() {
-            let mut d = self.array_dims.clone();
-            d.push(unconstrained_size(self.base, self.constraint));
-            d
-        } else {
-            self.dims()
-        };
+        if self.is_tuple() {
+            return self.tuple_names(VarInfo::unconstrained_names);
+        }
+        let mut dims = self.array_dims.clone();
+        dims.extend(self.constraint.unconstrained_dims(self.base));
         let mut out = Vec::with_capacity(self.num_unconstrained());
         for idx in column_major_indices(&dims) {
             let name = indexed_name(&self.name, &idx);
@@ -287,7 +364,22 @@ impl VarInfo {
     }
 
     /// Storage-order position of each output-order value: `output[i] = storage[perm[i]]`.
+    ///
+    /// A tuple variable is stored element by element with the array indices in column-major
+    /// order (stanc3's order for arrays of tuples), each element holding its components in
+    /// order, each in its own storage order.
     fn output_permutation(&self) -> Vec<usize> {
+        if self.is_tuple() {
+            let mut perm = Vec::with_capacity(self.num_constrained());
+            let mut offset = 0;
+            for _ in 0..self.num_elements() {
+                for slot in &self.slots {
+                    perm.extend(slot.output_permutation().into_iter().map(|p| p + offset));
+                    offset += slot.num_constrained();
+                }
+            }
+            return perm;
+        }
         let unit = if self.base.is_complex() { 2 } else { 1 };
         let dims = self.dims();
         let k = dims.len();
@@ -546,6 +638,104 @@ mod tests {
 
         let m = p("m", vec![], BaseType::Matrix(2, 3), Constraint::None);
         assert_eq!(m.unconstrained_names()[..3], ["m.1.1", "m.2.1", "m.1.2"]);
+
+        // sum_to_zero_matrix[3, 4], column_stochastic_matrix[3, 2], row_stochastic_matrix[2, 3]:
+        // two reduced dimensions.
+        let b = p(
+            "b",
+            vec![],
+            BaseType::Matrix(3, 4),
+            Constraint::SumToZeroMatrix,
+        );
+        assert_eq!(b.unconstrained_names()[..3], ["b.1.1", "b.2.1", "b.1.2"]);
+        assert_eq!(b.unconstrained_names().len(), 6);
+        let c = p(
+            "c",
+            vec![],
+            BaseType::Matrix(3, 2),
+            Constraint::StochasticColumn,
+        );
+        assert_eq!(
+            c.unconstrained_names(),
+            ["c.1.1", "c.2.1", "c.1.2", "c.2.2"]
+        );
+        let d = p(
+            "d",
+            vec![],
+            BaseType::Matrix(2, 3),
+            Constraint::StochasticRow,
+        );
+        assert_eq!(
+            d.unconstrained_names(),
+            ["d.1.1", "d.2.1", "d.1.2", "d.2.2"]
+        );
+        let st = p("a", vec![], BaseType::Vector(3), Constraint::SumToZero);
+        assert_eq!(st.unconstrained_names(), ["a.1", "a.2"]);
+        // cholesky_factor_cov[4, 3] and corr_matrix[3]: one free dimension.
+        let e = p(
+            "e",
+            vec![],
+            BaseType::Matrix(4, 3),
+            Constraint::CholeskyFactorCov,
+        );
+        assert_eq!(e.unconstrained_names().len(), 9);
+        assert_eq!(e.unconstrained_names()[8], "e.9");
+        let f = p("f", vec![], BaseType::Matrix(3, 3), Constraint::CorrMatrix);
+        assert_eq!(f.unconstrained_names(), ["f.1", "f.2", "f.3"]);
+        // array[2] cov_matrix[2]: the free dimension varies slowest after the array index.
+        let g = p("g", vec![2], BaseType::Matrix(2, 2), Constraint::CovMatrix);
+        assert_eq!(g.unconstrained_names()[..3], ["g.1.1", "g.2.1", "g.1.2"]);
+        // tuple(real, vector[2]) p; array[2, 3] tuple(real<lower=0>, simplex[3]) q;
+        let tp = VarInfo::tuple(
+            "p",
+            Block::Parameters,
+            vec![],
+            vec![
+                VarInfo::real_param(""),
+                p("", vec![], BaseType::Vector(2), Constraint::None),
+            ],
+        );
+        assert_eq!(tp.output_names(), ["p:1", "p:2.1", "p:2.2"]);
+        let q = VarInfo::tuple(
+            "q",
+            Block::Parameters,
+            vec![2, 3],
+            vec![
+                p(
+                    "",
+                    vec![],
+                    BaseType::Real,
+                    Constraint::Lower(Bound::Value(0.0)),
+                ),
+                p("", vec![], BaseType::Vector(3), Constraint::Simplex),
+            ],
+        );
+        assert_eq!(
+            q.output_names()[..6],
+            [
+                "q.1.1:1",
+                "q.1.1:2.1",
+                "q.1.1:2.2",
+                "q.1.1:2.3",
+                "q.2.1:1",
+                "q.2.1:2.1"
+            ]
+        );
+        assert_eq!(
+            q.unconstrained_names()[..4],
+            ["q.1.1:1", "q.1.1:2.1", "q.1.1:2.2", "q.2.1:1"]
+        );
+        assert_eq!((q.num_constrained(), q.num_unconstrained()), (24, 18));
+        let zm = p(
+            "zm",
+            vec![],
+            BaseType::ComplexMatrix(2, 2),
+            Constraint::None,
+        );
+        assert_eq!(
+            zm.unconstrained_names()[..3],
+            ["zm.1.1.real", "zm.1.1.imag", "zm.2.1.real"]
+        );
     }
 
     #[test]

@@ -95,6 +95,25 @@ pub trait StanModel {
         constrain_parameters(info, |v| self.bounds(v), theta)
     }
 
+    /// Unconstrained parameters from constrained parameter values in output order (exactly
+    /// [`ModelInfo::num_outputs`] of [`Outputs::PARAMETERS`] values; the caller checks).
+    ///
+    /// The default frees each parameter with the bounds from [`StanModel::bounds`]. Models whose
+    /// bounds depend on other parameters override it, freeing the parameters in declaration
+    /// order so that each bound can be computed from the constrained values before it.
+    fn unconstrain_impl(&self, constrained: &[f64]) -> Result<Vec<f64>> {
+        let info = self.model_info();
+        let mut out = Vec::with_capacity(info.num_unconstrained());
+        let mut pos = 0;
+        for v in info.parameters() {
+            let n = v.num_constrained();
+            let storage = v.to_storage_order(&constrained[pos..pos + n]);
+            pos += n;
+            out.extend(transform::free(v, &self.bounds(v)?, &storage)?);
+        }
+        Ok(out)
+    }
+
     /// The bounds of a parameter. The default reads constant bounds from the metadata; models
     /// whose bounds depend on data override it.
     fn bounds(&self, var: &crate::VarInfo) -> Result<Bounds> {
@@ -176,8 +195,8 @@ pub trait Model {
         opts: LogDensityOptions,
     ) -> Result<(f64, Vec<f64>)>;
 
-    /// Log density, writing its gradient into `gradient` (which must have
-    /// [`Model::num_unconstrained`] values). Avoids allocating the gradient.
+    /// Log density, writing its gradient into a caller-owned buffer `gradient` (which must have
+    /// [`Model::num_unconstrained`] values). The evaluation itself still allocates its tape.
     fn log_density_gradient_into(
         &self,
         theta: &[f64],
@@ -233,6 +252,8 @@ pub trait Model {
     /// Unconstrained parameters from constrained values given by name, in CmdStan's JSON format
     /// (for example user supplied initial values). Every parameter must be present.
     fn param_unconstrain_json(&self, values: &Data) -> Result<Vec<f64>> {
+        // Bounds that depend on other parameters are handled by the model's unconstrain, which
+        // receives all values at once.
         let mut flat = Vec::with_capacity(self.num_outputs(Outputs::PARAMETERS));
         for v in self.info().parameters() {
             let x = values.read(v).map_err(|e| ModelError {
@@ -251,16 +272,6 @@ fn check_len(theta: &[f64], n: usize, what: &str) -> Result<()> {
             "expected {n} {what}, found {}",
             theta.len()
         )));
-    }
-    Ok(())
-}
-
-fn check_finite(theta: &[f64]) -> Result<()> {
-    if let Some((i, v)) = theta.iter().enumerate().find(|(_, v)| !v.is_finite()) {
-        return Err(
-            ModelError::parameters(format!("unconstrained parameter {} is {v}", i + 1))
-                .with_value(*v),
-        );
     }
     Ok(())
 }
@@ -411,22 +422,21 @@ impl<M: StanModel> Model for M {
             info.num_outputs(Outputs::PARAMETERS),
             "constrained parameter values",
         )?;
-        let mut out = Vec::with_capacity(info.num_unconstrained());
-        let mut pos = 0;
-        for v in info.parameters() {
-            let n = v.num_constrained();
-            let storage = v.to_storage_order(&constrained[pos..pos + n]);
-            pos += n;
-            let y = transform::free(v, &self.bounds(v)?, &storage)?;
-            if let Some(bad) = y.iter().find(|y| !y.is_finite()) {
-                return Err(ModelError::parameters(format!(
-                    "the value is on the boundary of its constraint (unconstrained value {bad})"
-                ))
-                .with_variable(v.name.clone()));
-            }
-            out.extend(y);
+        let out = StanModel::unconstrain_impl(self, constrained)?;
+        if out.len() != info.num_unconstrained() {
+            return Err(ModelError::internal(format!(
+                "unconstrain returned {} values; the metadata declares {}",
+                out.len(),
+                info.num_unconstrained()
+            )));
         }
-        check_finite(&out)?;
+        if let Some((i, bad)) = out.iter().enumerate().find(|(_, y)| !y.is_finite()) {
+            let names = info.unconstrained_names();
+            return Err(ModelError::parameters(format!(
+                "the value is on the boundary of its constraint (unconstrained value {bad})"
+            ))
+            .with_variable(names[i].clone()));
+        }
         Ok(out)
     }
 }

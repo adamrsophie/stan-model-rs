@@ -7,7 +7,9 @@ use std::sync::Arc;
 use proptest::prelude::*;
 use stan_model_rs::rng;
 use stan_model_rs::{Data, ErrorKind, LogDensityOptions, Model, Outputs};
-use stan_model_rs_fixtures::{Empty, LinearRegression, NormalMean, NormalScale, Structured};
+use stan_model_rs_fixtures::{
+    DependentBound, Empty, LinearRegression, NormalMean, NormalScale, Structured,
+};
 
 const LN_SQRT_2PI: f64 = 0.918_938_533_204_672_7;
 
@@ -375,6 +377,41 @@ fn propto_drops_only_constants() {
         .1;
     assert_eq!(ga, gp);
     let _ = NormalMean::new(&Data::from_json_str(r#"{"y": 1}"#).unwrap()).unwrap();
+}
+
+#[test]
+fn parameter_dependent_bound() {
+    let m = DependentBound::new();
+    let theta = [0.4, -0.3];
+    let c = m.param_constrain(&theta).unwrap();
+    assert!(close(c[1], 0.4 + f64::exp(-0.3), 1e-15));
+    let back = m.param_unconstrain(&c).unwrap();
+    assert!(close(back[0], 0.4, 1e-15) && close(back[1], -0.3, 1e-12));
+    // b below a is outside the support.
+    let e = m.param_unconstrain(&[1.0, 0.5]).unwrap_err();
+    assert_eq!(e.variable.as_deref(), Some("b"));
+    let with = m.log_density(&theta, LogDensityOptions::default()).unwrap();
+    let without = m
+        .log_density(
+            &theta,
+            LogDensityOptions {
+                jacobian: false,
+                propto: false,
+            },
+        )
+        .unwrap();
+    let log_det = numeric_log_det(|y| m.param_constrain(y).unwrap(), &theta);
+    assert!(close(with - without, log_det, 1e-6));
+    let c = m
+        .check_gradient(&theta, LogDensityOptions::SAMPLING, 1e-6)
+        .unwrap();
+    assert!(c.max_rel_error < 1e-6, "{c:?}");
+    // The metadata alone cannot evaluate the bound.
+    let b = m.info().variable("b").unwrap();
+    assert_eq!(
+        stan_model_rs::Bounds::from_metadata(b).unwrap_err().kind,
+        ErrorKind::Unsupported
+    );
 }
 
 proptest! {
