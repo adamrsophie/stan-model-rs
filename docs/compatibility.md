@@ -24,7 +24,8 @@ contract its documentation says should move into stan-model-rs. Until stanc-rs t
 stan-model-rs, `stan-model-rs-stanc` adapts its models to `Model` and runs end-to-end tests.
 The adapter cannot provide Hessians (the object-safe stanc-rs interface has no generic log
 density) and reports every variable as unconstrained in the metadata (stanc-rs does not export
-constraints); its names, values, and gradients are exact.
+constraints). Its output names, values, gradients, constrained values, and generated quantities
+match the hand-written models; its unconstrained names are stanc-rs's positional `theta.1`, ...
 
 To target `StanModel` directly, the generated code needs these interface changes:
 

@@ -36,4 +36,4 @@ with CmdStan 2.40 and evaluated with
 
 ## Results
 
-All checks pass on macOS (aarch64) with Rust 1.98. CI runs them on Linux, macOS, and Windows.
+All checks pass on macOS (aarch64) with Rust 1.100. CI runs them on Linux, macOS, and Windows.

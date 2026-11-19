@@ -70,7 +70,7 @@ See [docs/numerical-validation.md](docs/numerical-validation.md) for details and
 
 ## Building
 
-Rust 1.85 or later. `cargo test --workspace` runs every test; `cargo test -p stan-model-rs
+Rust 1.85 or later for the runtime and fixtures (1.88 for the stanc-rs adapter, which stanc-rs requires). `cargo test --workspace` runs every test; `cargo test -p stan-model-rs
 --features nuts` adds the sampler test; `cargo bench -p stan-model-rs` runs the benchmarks.
 The workspace has no C++ dependencies.
 

@@ -20,8 +20,9 @@ fn main() {
         println!("cargo::rerun-if-changed={}", f.display());
         let stem = f.file_stem().unwrap().to_str().unwrap().to_string();
         let text = std::fs::read_to_string(&f).unwrap();
-        let compiled = stanc_rs::compile_source(f.to_str().unwrap(), &text, &Default::default())
-            .unwrap_or_else(|e| panic!("stanc-rs failed on {}:\n{e}", f.display()));
+        let compiled =
+            stanc_rs::compile_source(&format!("{stem}.stan"), &text, &Default::default())
+                .unwrap_or_else(|e| panic!("stanc-rs failed on {}:\n{e}", f.display()));
         std::fs::write(out.join(format!("{stem}.rs")), compiled.rust).unwrap();
         writeln!(
             index,
