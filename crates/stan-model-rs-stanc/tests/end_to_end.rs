@@ -167,3 +167,30 @@ fn structured_and_regression_match_hand_written_and_cmdstan() {
         stan_model_rs::ErrorKind::Unsupported
     );
 }
+
+/// A generated model's `print` output reaches stan-model-rs's per-thread sink, lines printed
+/// before a `reject` are kept, and the rejection carries its Stan source location.
+#[test]
+fn print_and_error_locations() {
+    use stan_model_rs::{ErrorKind, print};
+    let d = convert_data(&data(r#"{"y": 1.0}"#)).unwrap();
+    let m =
+        Stanc::new(stan_model_rs_stanc::forward_print(|| print_reject::Model::new(&d, 1)).unwrap());
+    let opts = LogDensityOptions::default();
+
+    let (lp, out) = print::with_sink(Vec::new(), || m.log_density(&[0.5], opts));
+    assert!(lp.unwrap().is_finite());
+    assert_eq!(String::from_utf8(out).unwrap(), "mu = 0.5\n");
+
+    let (r, out) = print::with_sink(Vec::new(), || m.log_density_gradient(&[11.0], opts));
+    assert_eq!(String::from_utf8(out).unwrap(), "mu = 11\n");
+    let e = r.unwrap_err();
+    assert_eq!(e.kind, ErrorKind::Reject);
+    assert!(e.message.contains("mu too large: 11"), "{e}");
+    assert_eq!(e.locations.len(), 1, "{e}");
+    assert!(
+        e.locations[0].starts_with("'print_reject.stan', line 10"),
+        "{e}"
+    );
+    assert!(e.to_string().ends_with(&format!("(in {})", e.locations[0])));
+}

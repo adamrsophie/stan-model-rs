@@ -6,10 +6,15 @@
 //! stanc-rs at build time, for the end-to-end tests. When stanc-rs generates code against
 //! stan-model-rs directly, this adapter goes away.
 //!
+//! Errors keep the Stan source locations stanc-rs records, and `print` output reaches
+//! [`stan_model_rs::print`]'s sinks (see [`forward_print`]).
+//!
 //! The stanc-rs runtime has no Hessian drivers and does not report constraints, so
 //! [`Model::log_density_hessian`] and [`Model::log_density_hessian_vector_product`] return
 //! [`ErrorKind::Unsupported`], and the metadata lists every variable as unconstrained real
 //! values with its declared shape.
+
+use std::io::Write;
 
 use stan_model_rs::meta::{BaseType, Block, Constraint, ModelInfo, Outputs, VarInfo};
 use stan_model_rs::rand::Rng;
@@ -24,7 +29,7 @@ pub mod generated {
 }
 
 /// The stanc-rs revision the adapter is built against.
-pub const COMPILER: &str = "stanc-rs 0.1.0 (242398e)";
+pub const COMPILER: &str = "stanc-rs 0.1.0 (02406c5)";
 
 /// A stanc-rs model seen through the stan-model-rs interface.
 pub struct Stanc<M> {
@@ -44,7 +49,49 @@ fn convert_error(e: rt::ModelError) -> ModelError {
         #[allow(unreachable_patterns)]
         _ => ErrorKind::Internal,
     };
-    ModelError::new(kind, e.message)
+    let mut out = ModelError::new(kind, e.message);
+    out.locations = e.locations;
+    out
+}
+
+/// Runs `f` with the stanc-rs runtime's `print` output passed on, line by line, to
+/// [`stan_model_rs::print`], so that `stan_model_rs::print::with_sink` captures what generated
+/// models print. [`Stanc`] does this for every evaluation; wrap model constructors (whose
+/// transformed data block may print) in it as well.
+pub fn forward_print<R>(f: impl FnOnce() -> R) -> R {
+    let (r, mut lines) = rt::print::with_sink(Lines(Vec::new()), f);
+    lines.finish();
+    r
+}
+
+/// Splits the bytes the stanc-rs runtime writes into lines.
+struct Lines(Vec<u8>);
+
+impl Lines {
+    fn emit(&mut self, end: usize) {
+        let line: Vec<u8> = self.0.drain(..end).collect();
+        stan_model_rs::print::line(String::from_utf8_lossy(&line).trim_end_matches('\n'));
+    }
+
+    fn finish(&mut self) {
+        if !self.0.is_empty() {
+            self.emit(self.0.len());
+        }
+    }
+}
+
+impl Write for Lines {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0.extend_from_slice(buf);
+        while let Some(i) = self.0.iter().position(|&b| b == b'\n') {
+            self.emit(i + 1);
+        }
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
 }
 
 fn convert_var(v: &rt::VarInfo) -> VarInfo {
@@ -151,8 +198,7 @@ impl<M: rt::Model> Model for Stanc<M> {
     }
 
     fn log_density(&self, theta: &[f64], opts: LogDensityOptions) -> Result<f64> {
-        self.inner
-            .log_density(theta, density_options(opts))
+        forward_print(|| self.inner.log_density(theta, density_options(opts)))
             .map_err(convert_error)
     }
 
@@ -161,9 +207,11 @@ impl<M: rt::Model> Model for Stanc<M> {
         theta: &[f64],
         opts: LogDensityOptions,
     ) -> Result<(f64, Vec<f64>)> {
-        self.inner
-            .log_density_gradient(theta, density_options(opts))
-            .map_err(convert_error)
+        forward_print(|| {
+            self.inner
+                .log_density_gradient(theta, density_options(opts))
+        })
+        .map_err(convert_error)
     }
 
     fn log_density_gradient_into(
@@ -208,14 +256,15 @@ impl<M: rt::Model> Model for Stanc<M> {
     }
 
     fn write_array(&self, theta: &[f64], outputs: Outputs, rng: &mut dyn Rng) -> Result<Vec<f64>> {
-        self.inner
-            .write_array(
+        forward_print(|| {
+            self.inner.write_array(
                 theta,
                 outputs.transformed_parameters,
                 outputs.generated_quantities,
                 rng,
             )
-            .map_err(convert_error)
+        })
+        .map_err(convert_error)
     }
 
     fn param_unconstrain(&self, constrained: &[f64]) -> Result<Vec<f64>> {
@@ -245,6 +294,6 @@ impl<M: rt::Model> Model for Stanc<M> {
 
     fn param_unconstrain_json(&self, values: &Data) -> Result<Vec<f64>> {
         let values = convert_data(values)?;
-        self.inner.unconstrain(&values).map_err(convert_error)
+        forward_print(|| self.inner.unconstrain(&values)).map_err(convert_error)
     }
 }

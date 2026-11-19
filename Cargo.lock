@@ -1062,9 +1062,10 @@ dependencies = [
 [[package]]
 name = "stanc-rs"
 version = "0.1.0"
-source = "git+https://github.com/adamrsophie/stanc-rs?rev=242398e7bbd1754a514f221d31078254afb108f8#242398e7bbd1754a514f221d31078254afb108f8"
+source = "git+https://github.com/adamrsophie/stanc-rs?rev=02406c58d23933a4322abadc4824e263c6088abf#02406c58d23933a4322abadc4824e263c6088abf"
 dependencies = [
  "stanc-rs-codegen",
+ "stanc-rs-mir",
  "stanc-rs-semantic",
  "stanc-rs-syntax",
 ]
@@ -1072,7 +1073,16 @@ dependencies = [
 [[package]]
 name = "stanc-rs-codegen"
 version = "0.1.0"
-source = "git+https://github.com/adamrsophie/stanc-rs?rev=242398e7bbd1754a514f221d31078254afb108f8#242398e7bbd1754a514f221d31078254afb108f8"
+source = "git+https://github.com/adamrsophie/stanc-rs?rev=02406c58d23933a4322abadc4824e263c6088abf#02406c58d23933a4322abadc4824e263c6088abf"
+dependencies = [
+ "stanc-rs-semantic",
+ "stanc-rs-syntax",
+]
+
+[[package]]
+name = "stanc-rs-mir"
+version = "0.1.0"
+source = "git+https://github.com/adamrsophie/stanc-rs?rev=02406c58d23933a4322abadc4824e263c6088abf#02406c58d23933a4322abadc4824e263c6088abf"
 dependencies = [
  "stanc-rs-semantic",
  "stanc-rs-syntax",
@@ -1081,7 +1091,7 @@ dependencies = [
 [[package]]
 name = "stanc-rs-runtime"
 version = "0.1.0"
-source = "git+https://github.com/adamrsophie/stanc-rs?rev=242398e7bbd1754a514f221d31078254afb108f8#242398e7bbd1754a514f221d31078254afb108f8"
+source = "git+https://github.com/adamrsophie/stanc-rs?rev=02406c58d23933a4322abadc4824e263c6088abf#02406c58d23933a4322abadc4824e263c6088abf"
 dependencies = [
  "rand 0.10.4",
  "serde_json",
@@ -1091,7 +1101,7 @@ dependencies = [
 [[package]]
 name = "stanc-rs-semantic"
 version = "0.1.0"
-source = "git+https://github.com/adamrsophie/stanc-rs?rev=242398e7bbd1754a514f221d31078254afb108f8#242398e7bbd1754a514f221d31078254afb108f8"
+source = "git+https://github.com/adamrsophie/stanc-rs?rev=02406c58d23933a4322abadc4824e263c6088abf#02406c58d23933a4322abadc4824e263c6088abf"
 dependencies = [
  "stanc-rs-syntax",
 ]
@@ -1099,7 +1109,7 @@ dependencies = [
 [[package]]
 name = "stanc-rs-syntax"
 version = "0.1.0"
-source = "git+https://github.com/adamrsophie/stanc-rs?rev=242398e7bbd1754a514f221d31078254afb108f8#242398e7bbd1754a514f221d31078254afb108f8"
+source = "git+https://github.com/adamrsophie/stanc-rs?rev=02406c58d23933a4322abadc4824e263c6088abf#02406c58d23933a4322abadc4824e263c6088abf"
 
 [[package]]
 name = "stanmath-rs"

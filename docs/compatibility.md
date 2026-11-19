@@ -1,7 +1,7 @@
 # Compatibility
 
 Reference implementation: Stan 2.40 (stanc 2.40, CmdStan 2.40). Mathematics: stanmath-rs at
-revision `04dc871`. stanc-rs: revision `242398e`.
+revision `04dc871`. stanc-rs: revision `02406c5`.
 
 ## Differences from Stan
 
@@ -32,7 +32,7 @@ revision `04dc871`. stanc-rs: revision `242398e`.
 
 ## stanc-rs integration
 
-stanc-rs (revision `242398e`) generates code against its own crate `stanc-rs-runtime`, whose
+stanc-rs (revision `02406c5`) generates code against its own crate `stanc-rs-runtime`, whose
 contract its documentation says should move into stan-model-rs. Until stanc-rs targets
 stan-model-rs, `stan-model-rs-stanc` adapts its models to `Model` and runs end-to-end tests.
 The adapter cannot provide Hessians (the object-safe stanc-rs interface has no generic log
@@ -53,7 +53,7 @@ To target `StanModel` directly, the generated code needs these interface changes
 | `Model::unconstrained_param_names` returns `theta.1`, ... | stanc3's names from the metadata |
 | `rt::data::Data`, `rt::io::Reader` | `stan_model_rs::Data`, `transform::Reader` |
 | no Hessians | `log_density_hessian` and Hessian-vector products through `Dual<Var>` |
-| `print::{set_sink, with_sink, line}`, `ModelError::locations`, `locate` (in development after `242398e`) | the same functions in `stan_model_rs::print` and `stan_model_rs::error`, so generated code needs no change; the adapter forwards locations once its pin includes them |
+| `print::{set_sink, with_sink, line}`, `ModelError::locations`, `locate` | the same functions in `stan_model_rs::print` and `stan_model_rs::error`, so generated code needs no change; meanwhile the adapter copies locations and passes printed lines on to `stan_model_rs::print` (`forward_print`) |
 
 Two facts the generated code must respect, both already true of stanc-rs:
 
